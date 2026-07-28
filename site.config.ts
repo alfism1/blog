@@ -19,14 +19,14 @@ export const siteConfig = {
   locale: "en_US",
   language: "en",
   author: {
-    name: "Alfi Alfarisi",
+    name: "Alfi Samudro",
     email: "alfialfarisi@gmail.com",
     url: normalizeUrl(
       process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000",
     ),
   },
   /** Shown in the footer + used for the RSS feed copyright line. */
-  copyright: `© ${new Date().getFullYear()} Alfi Alfarisi`,
+  copyright: `© ${new Date().getFullYear()} Alfi Samudro`,
   social: {
     github: "https://github.com/",
     x: "https://x.com/",
