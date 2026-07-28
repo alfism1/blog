@@ -30,8 +30,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files — .env.example is the documented template and IS committed
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -39,3 +40,15 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# graphify — generated knowledge graph output, regenerable from source
+/graphify-out/
+
+# editors / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# agent tooling — machine-local overrides
+.claude/settings.local.json

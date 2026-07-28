@@ -1,0 +1,181 @@
+---
+title: "Running a Git-based CMS on Vercel's read-only filesystem"
+slug: "git-based-cms-on-vercel"
+description: "Serverless functions cannot write to disk, so an admin panel that edits MDX files has to commit through the GitHub API instead. Here is the full pattern."
+date: "2026-06-14T09:00:00.000Z"
+updatedAt: "2026-07-28T12:46:40.647Z"
+tags:
+  - "nextjs"
+  - "vercel"
+  - "architecture"
+  - "mdx"
+category: "Architecture"
+status: "draft"
+featured: true
+---
+
+<KeyTakeaway>
+Vercel's serverless filesystem is ephemeral and read-only. An admin panel that
+writes MDX must commit through the GitHub API; the resulting push triggers a
+redeploy, and the redeploy is what makes the change live.
+</KeyTakeaway>
+
+The appealing thing about a file-based blog is that there is no database to pay
+for, back up, or migrate. The content lives in Git next to the code, and Git is
+already the best-audited storage system most of us will ever use.
+
+The awkward thing is what happens when you want an admin panel.
+
+## The trap: writing files from an API route
+
+The obvious implementation is a few dozen lines:
+
+```ts title="app/api/posts/route.ts"
+import { writeFile } from "node:fs/promises";
+
+export async function POST(request: Request) {
+  const { slug, content } = await request.json();
+  await writeFile(`content/posts/${slug}.mdx`, content, "utf8");
+  return Response.json({ ok: true });
+}
+```
+
+This works perfectly in `next dev`. It appears to work in production. Then the
+post disappears.
+
+Serverless functions run in a container whose filesystem is **read-only except
+for `/tmp`**, and even `/tmp` is discarded when the instance is recycled. A
+write either throws `EROFS` or lands somewhere that no future request will ever
+see. Worse, because the page you just edited is still cached, the UI often shows
+success.
+
+<Callout type="warning" title="The failure is silent">
+The bug does not surface at write time. It surfaces on the next cold start,
+often hours later, when the post is simply gone. Test persistence by forcing a
+new deployment, not by re-reading the page you just saved.
+</Callout>
+
+## The pattern: commit, don't write
+
+Instead of treating the filesystem as the database, treat **the repository** as
+the database and the GitHub REST API as its client.
+
+The flow becomes:
+
+1. The admin submits a form.
+2. A server action authenticates the request and validates the frontmatter.
+3. The handler commits the `.mdx` file to the repo through the GitHub API.
+4. GitHub notifies Vercel; Vercel's Git integration starts a build.
+5. Roughly a minute later the statically generated page is live.
+
+Step 3 is the only part that needs care.
+
+### One commit per action
+
+The convenient endpoint — `createOrUpdateFileContents` — handles exactly one
+file per call. That is fine until a rename, which means "write the new file and
+delete the old one." Two calls means two commits, which means two builds, and a
+window where both slugs resolve.
+
+The Git Data API expresses the whole thing as a single commit:
+
+```ts title="lib/content/github-api-adapter.ts" {12-17}
+const { data: ref } = await octokit.rest.git.getRef({
+  owner,
+  repo,
+  ref: `heads/${branch}`,
+});
+
+const { data: head } = await octokit.rest.git.getCommit({
+  owner,
+  repo,
+  commit_sha: ref.object.sha,
+});
+
+const { data: tree } = await octokit.rest.git.createTree({
+  owner,
+  repo,
+  base_tree: head.tree.sha,
+  tree: changes,
+});
+
+const { data: commit } = await octokit.rest.git.createCommit({
+  owner,
+  repo,
+  message,
+  tree: tree.sha,
+  parents: [ref.object.sha],
+});
+
+await octokit.rest.git.updateRef({
+  owner,
+  repo,
+  ref: `heads/${branch}`,
+  sha: commit.sha,
+});
+```
+
+A tree entry with `sha: null` deletes a path. A tree entry with `content` writes
+UTF-8 text. Binary files — images — need a blob created first, because the
+`content` field will mangle any byte sequence that is not valid UTF-8.
+
+## Keep the dev loop fast
+
+Committing to GitHub on every keystroke of local development would be miserable
+and would pollute the history. The fix is a single interface with two
+implementations:
+
+```ts
+export interface ContentAdapter {
+  list(): Promise<ListResult>;
+  get(slug: string): Promise<Post | null>;
+  create(post: PostInput): Promise<WriteResult>;
+  update(previousSlug: string, post: PostInput): Promise<WriteResult>;
+  remove(slug: string): Promise<WriteResult>;
+}
+```
+
+Development resolves to a filesystem adapter; production resolves to the GitHub
+adapter. Every caller — the admin dashboard, the public pages, the sitemap —
+talks to the interface and never learns which one it got.
+
+## Reads are the easy half
+
+Because the public pages are statically generated, reads happen at **build
+time**, when the repository is checked out and the GitHub API is not even needed
+for correctness. The cost that matters is API calls per build.
+
+Fetching each `.mdx` file individually is one REST call per post. GraphQL
+collapses that to one call for the entire directory:
+
+```graphql
+query ($owner: String!, $repo: String!, $expression: String!) {
+  repository(owner: $owner, name: $repo) {
+    object(expression: $expression) {
+      ... on Tree {
+        entries {
+          name
+          object {
+            ... on Blob {
+              text
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+With `expression: "main:content/posts"` that returns every filename and every
+file body in a single round trip.
+
+## What this costs
+
+Nothing, which was the point. GitHub's API is free at this volume, Vercel's
+Hobby plan covers a personal blog's traffic, and the only recurring expense is
+the domain name.
+
+The trade you are making is latency: a publish is not instant, it is a build.
+For a blog that is entirely acceptable — and in exchange every edit is a commit,
+every commit is reviewable, and rolling back a bad post is `git revert`.

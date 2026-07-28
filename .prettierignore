@@ -1,0 +1,8 @@
+.next
+node_modules
+out
+build
+package-lock.json
+content/posts
+public
+next-env.d.ts

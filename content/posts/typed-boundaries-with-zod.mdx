@@ -1,0 +1,104 @@
+---
+title: "Validate at the boundary, trust the inside"
+slug: "typed-boundaries-with-zod"
+description: "TypeScript types vanish at runtime, so every place data enters your program needs a real check. A short argument for validating once, at the edge."
+date: "2026-05-20T09:00:00.000Z"
+updatedAt: "2026-07-28T12:46:53.087Z"
+tags:
+  - "typescript"
+  - "zod"
+  - "architecture"
+category: "Engineering"
+status: "draft"
+featured: false
+---
+
+Every TypeScript codebase has a moment where someone writes this:
+
+```ts
+const post = JSON.parse(raw) as Post;
+```
+
+It compiles. It is also a lie: `as` asserts a shape the compiler has no evidence
+for, and the type disappears entirely at runtime.
+
+## Where the boundaries actually are
+
+A boundary is any point where data enters the program from somewhere the
+compiler cannot see:
+
+| Boundary | Typical shape |
+| --- | --- |
+| HTTP request body | `unknown` from `request.json()` |
+| Form submission | `FormData`, all strings |
+| File on disk | parsed YAML or JSON |
+| Third-party API | whatever they shipped this week |
+| Environment variables | `string \| undefined` |
+
+Inside those boundaries, TypeScript's guarantees are real. Outside them, they
+are aspirational.
+
+## One schema, two uses
+
+The move is to define the shape once as a runtime schema and derive the static
+type from it, rather than declaring the type and hoping the runtime matches:
+
+```ts title="lib/content/schema.ts"
+export const frontmatterSchema = z.object({
+  title: z.string().min(1).max(140),
+  slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  description: z.string().min(120).max(160),
+  status: z.enum(["draft", "published"]).default("draft"),
+});
+
+export type Frontmatter = z.infer<typeof frontmatterSchema>;
+```
+
+There is now exactly one definition. It cannot drift, because the type *is* the
+schema.
+
+## Validation is documentation that runs
+
+Look at `description: z.string().min(120).max(160)`. That is not arbitrary — it
+is the range in which search engines render a meta description without
+truncating it.
+
+Encoded as a comment, that constraint decays. Encoded as a schema, it is
+enforced on every save, and the error message can explain itself:
+
+```ts
+z.string()
+  .min(120, "Too short to be a useful meta description")
+  .max(160, "Search engines will truncate anything longer");
+```
+
+<Callout type="tip">
+Error messages are user interface. Writing them properly costs one line each and
+turns a form rejection from a puzzle into an instruction.
+</Callout>
+
+## Parse, don't validate
+
+The subtle benefit is that a schema **transforms** as it checks. A date arrives
+as a string, a `Date`, or an unquoted YAML scalar; it leaves as a normalised ISO
+string:
+
+```ts
+const isoDate = z
+  .string()
+  .refine((value) => !Number.isNaN(Date.parse(value)))
+  .transform((value) => new Date(value).toISOString());
+```
+
+Every consumer downstream now gets one shape. The alternative — defensive
+normalisation scattered through the render path — is the thing that produces
+`Invalid Date` in production six months later.
+
+## Where not to put it
+
+Validation belongs at the boundary and nowhere else. Re-validating the same
+object as it moves between internal functions adds cost and noise, and signals
+that the boundary is unclear.
+
+If a function three layers deep feels the need to check its input, the honest
+fix is usually to move the boundary, not to add another check.

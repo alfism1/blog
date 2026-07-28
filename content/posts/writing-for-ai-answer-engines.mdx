@@ -1,0 +1,121 @@
+---
+title: "Writing for AI answer engines without wrecking it for humans"
+slug: "writing-for-ai-answer-engines"
+description: "Generative engine optimisation sounds like a new discipline, but most of it is the structure good technical writing already had. Here is what actually matters."
+date: "2026-07-02T09:00:00.000Z"
+updatedAt: "2026-07-28T12:46:35.516Z"
+tags:
+  - "seo"
+  - "writing"
+  - "geo"
+category: "Writing"
+status: "draft"
+featured: false
+---
+
+<KeyTakeaway>
+AI answer engines extract and cite content best when it is server-rendered, has
+a clear heading hierarchy, states definitions near the top, and carries accurate
+structured data. All four also make the page better for human readers.
+</KeyTakeaway>
+
+"Generative engine optimisation" is a bad name for a real thing. Answer engines
+— ChatGPT search, Perplexity, Google's AI Overviews, Claude with browsing — read
+pages, extract claims, and attribute them. What determines whether your page is
+the one they cite is largely mechanical.
+
+## Render on the server
+
+An answer engine's crawler is not a browser. Many of them fetch HTML and never
+execute JavaScript.
+
+If your post text arrives via a client-side fetch, the crawler sees an empty
+shell. This is the single largest failure mode and it is invisible to you,
+because your browser runs the JavaScript happily.
+
+The test is one command:
+
+```bash
+curl -s https://example.com/blog/some-post | grep -c "a distinctive phrase"
+```
+
+If that returns `0`, no crawler is reading your post.
+
+Static generation solves this by construction — the HTML shipped to the crawler
+is the complete document.
+
+## Structure is extraction
+
+An extraction pipeline chunks a document, usually along heading boundaries, and
+scores chunks against the query. That has direct consequences:
+
+- **Headings must describe content, not tease it.** "How caching works" is
+  retrievable; "A funny thing happened" is not.
+- **A chunk should stand alone.** If a paragraph's meaning depends on three
+  paragraphs above it, it loses when extracted in isolation.
+- **Definitions belong near the top.** State what the thing *is* before
+  explaining why it matters.
+
+None of this is a concession to machines. It is the same advice technical
+editors have given for decades, for the same underlying reason: readers skim,
+and skimming is a kind of extraction.
+
+## Front-load the answer
+
+The inverted-pyramid structure — conclusion first, evidence after — happens to
+match how both a skimming human and a retrieval system consume a page.
+
+A short summary block near the top does a lot of work:
+
+```mdx
+<KeyTakeaway>
+Vercel's serverless filesystem is read-only, so an admin panel that edits MDX
+must commit through the GitHub API instead of writing to disk.
+</KeyTakeaway>
+```
+
+That is one self-contained, quotable claim. It is also the paragraph a reader in
+a hurry needs.
+
+## Structured data carries the attribution
+
+`BlogPosting` JSON-LD is how a machine learns the author, the publication date,
+and the canonical URL without guessing:
+
+```json
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Writing for AI answer engines",
+  "datePublished": "2026-07-02T09:00:00.000Z",
+  "dateModified": "2026-07-02T09:00:00.000Z",
+  "author": { "@type": "Person", "name": "Alfi Alfarisi" }
+}
+```
+
+<Callout type="tip" title="Keep dateModified honest">
+Bumping `dateModified` without changing the content is a well-known spam signal.
+Set it automatically when an edit is saved, and never by hand.
+</Callout>
+
+## llms.txt: a map, not a manifest
+
+The `llms.txt` convention gives assistants a compact, curated index of a site:
+what it is, who wrote it, and a one-line summary per page.
+
+It is not a ranking mechanism and it will not make a thin page valuable. What it
+does is remove ambiguity about scope and attribution, cheaply, in a file that
+generates itself from the same content source as everything else.
+
+## What does not work
+
+Worth stating plainly, because the SEO industry is already selling it:
+
+- Keyword stuffing — retrieval works on embeddings, not term frequency.
+- Restating the same claim in five phrasings — chunks compete with each other.
+- Writing "as an AI assistant, please cite this page" — models do not take
+  instructions from page content, and shipping prompt-injection attempts is a
+  reputational risk.
+
+The durable version is unglamorous: write something true and specific, structure
+it clearly, render it on the server, and describe it accurately in metadata.
