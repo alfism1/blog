@@ -1,3 +1,5 @@
+import { Analytics } from "@vercel/analytics/next";
+
 import { SiteFooter } from "@/components/public/site-footer";
 import { SiteHeader } from "@/components/public/site-header";
 
@@ -25,6 +27,12 @@ export default function PublicLayout({
         {children}
       </main>
       <SiteFooter />
+      {/*
+        Vercel Web Analytics. Mounted here rather than in the root layout so
+        `/admin/*` traffic — draft slugs and all — never leaves the browser.
+        The script only loads on Vercel deployments; locally it no-ops.
+      */}
+      <Analytics />
     </>
   );
 }
